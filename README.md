@@ -1,2 +1,2 @@
-# monitoramento
-Este repositório apresenta o desenvolvimento de um sistema inteligente de monitoramento de consumo residencial de água baseado em IoT. 
+# Monitoramento Inteligente - Controle de Vazamento
+O protótipo desenvolvido tem como objetivo monitorar o consumo de água em uma residência e identificar possíveis vazamentos. Como o sensor de fluxo não estava disponível no Wokwi, foi utilizado um encoder rotativo para simular a medição. O sistema também conta com um relé para controlar a válvula e LEDs que indicam visualmente o estado do sistema.
