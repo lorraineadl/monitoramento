@@ -53,111 +53,111 @@ O firmware foi escrito em C++ para o Arduino framework e utiliza as bibliotecas 
 ### Código-fonte principal (`main.ino`)
 ```cpp
 #include <WiFi.h>
+#include <WiFiClientSecure.h> // Cliente seguro (TLS)
 #include <PubSubClient.h>
 
-// Definições de pinos
-#define SENSOR_PIN 4         // Pino do sensor de fluxo (CLK do Encoder)
-#define RELAY_PIN 5          // Pino do relé e LED amarelo (alerta de vazamento)
-#define DT_PIN 15            // Pino DT do Encoder (opcional, mas incluído no circuito)
-#define LED_NORMAL 2         // Pino do LED verde (indica sistema ligado)
+#define SENSOR_PIN 4
+#define RELAY_PIN 5
+#define DT_PIN 15
+#define LED_NORMAL 2
 
-// MQTT
-#define TOPICO_MQTT_ENVIA "sensor/fluxo"       // Tópico para enviar dados (publicar)
-#define TOPICO_MQTT_RECEBE "sensor/comando"    // Tópico para receber comandos (subscrever)
-#define ID_MQTT "esp32_simulador"              // ID do cliente MQTT
+// Tópicos MQTT (ajuste conforme quiser)
+#define TOPICO_MQTT_ENVIA "vazamento/estado"
+#define TOPICO_MQTT_RECEBE "vazamento/comando"
 
-volatile int pulseCount = 0;   // Contador de pulsos do encoder (simula fluxo de água)
-bool relayState = false;       // Estado atual do relé (ativo/inativo)
+// Informações da rede Wi-Fi
+const char* SSID = "Wokwi-GUEST";
+const char* PASSWORD = "";
 
-// Instâncias do cliente WiFi e cliente MQTT
-WiFiClient mqtt_client;
-PubSubClient MQTT(mqtt_client);
+// Informações do broker HiveMQ Cloud
+const char* BROKER_MQTT = "SEU_HTML";
+const int BROKER_PORT = 8883;
+const char* MQTT_USER = "SEU_USUARIO";
+const char* MQTT_PASSWORD = "SUA_SENHA";
 
-// Função chamada quando uma nova mensagem MQTT é recebida
-void mqtt_callback(char* topico, byte* payload, unsigned int tamanho) {
-  String mensagem;
-  for (int i = 0; i < tamanho; i++) {
-    mensagem += (char)payload[i];
-  }
+WiFiClientSecure wifiClient;  // Cliente seguro para TLS
+PubSubClient MQTT(wifiClient);
 
-  Serial.print("Mensagem recebida no tópico [");
-  Serial.print(topico);
-  Serial.print("]: ");
-  Serial.println(mensagem);
+volatile int pulseCount = 0;
+bool relayState = false;
 
-  // Aqui você pode adicionar comandos recebidos via MQTT, se necessário
-}
-
-// Função de interrupção para contar pulsos
+// Função de interrupção
 void IRAM_ATTR countPulses() {
   pulseCount++;
 }
 
+// Callback de mensagens MQTT recebidas (se quiser tratar comandos)
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+  String msg;
+  for (unsigned int i = 0; i < length; i++) {
+    msg += (char)payload[i];
+  }
+  Serial.print("Mensagem recebida no tópico ");
+  Serial.print(topic);
+  Serial.print(": ");
+  Serial.println(msg);
+}
+
 void setup() {
-  // Configuração dos pinos
+  Serial.begin(115200);
+
   pinMode(SENSOR_PIN, INPUT_PULLUP);
-  pinMode(DT_PIN, INPUT_PULLUP);         // Pino DT pode ser usado para futuros incrementos
+  pinMode(DT_PIN, INPUT_PULLUP);
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_NORMAL, OUTPUT);
 
-  // Interrupção para contar os pulsos do encoder
   attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), countPulses, RISING);
 
-  Serial.begin(115200);
-  Serial.println("Iniciando conexão Wi-Fi...");
-
-  // Conectar ao Wi-Fi
-  WiFi.begin("Wokwi-GUEST", "");
+  // Conectar Wi-Fi
+  WiFi.begin(SSID, PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(100);
+    delay(500);
     Serial.print(".");
   }
-  Serial.println("\n✅ Wi-Fi conectado!");
+  Serial.println("Wi-Fi conectado!");
 
-  // Conectar ao broker MQTT
-  MQTT.setServer("broker.hivemq.com", 1883);
+  // Configura o cliente seguro
+  wifiClient.setInsecure(); // Apenas para testes. Em produção, use certificado CA válido
+
+  MQTT.setServer(BROKER_MQTT, BROKER_PORT);
   MQTT.setCallback(mqtt_callback);
 
-  Serial.println("Conectando ao broker MQTT...");
-  while (!MQTT.connect(ID_MQTT)) {
-    delay(100);
-    Serial.print(".");
+  // Conectar ao broker MQTT
+  while (!MQTT.connected()) {
+    Serial.println("Conectando ao broker MQTT...");
+    if (MQTT.connect("ESP32Client", MQTT_USER, MQTT_PASSWORD)) {
+      Serial.println("Conectado ao MQTT!");
+      MQTT.subscribe(TOPICO_MQTT_RECEBE);
+      MQTT.publish(TOPICO_MQTT_ENVIA, "Sistema iniciado.");
+    } else {
+      Serial.print("Falha na conexão. Código: ");
+      Serial.println(MQTT.state());
+      delay(2000);
+    }
   }
 
-  Serial.println("\n✅ MQTT conectado!");
-  MQTT.subscribe(TOPICO_MQTT_RECEBE);  // Inscreve-se para receber mensagens
-
-  digitalWrite(LED_NORMAL, HIGH);  // Liga LED verde ao iniciar o sistema
-
-  // Publica uma mensagem inicial
-  MQTT.publish(TOPICO_MQTT_ENVIA, "Sistema em funcionamento");
+  digitalWrite(LED_NORMAL, HIGH);  // Sistema ligado
 }
 
 void loop() {
-  MQTT.loop();  // Mantém a conexão MQTT ativa
+  MQTT.loop();
 
   Serial.print("Pulsos do sensor: ");
   Serial.println(pulseCount);
 
-  // Se o fluxo for muito alto (vazamento), ativa alerta (LED amarelo e relé)
   if (pulseCount > 50 && !relayState) {
     digitalWrite(RELAY_PIN, HIGH);
     relayState = true;
-    Serial.println("⚠️ Vazamento detectado! Fechando válvula...");
-  }
-  // Se fluxo normal, desativa o alerta
-  else if (pulseCount <= 50 && relayState) {
+    Serial.println("⚠️ Vazamento detectado!");
+    MQTT.publish(TOPICO_MQTT_ENVIA, "Vazamento detectado");
+  } else if (pulseCount <= 50 && relayState) {
     digitalWrite(RELAY_PIN, LOW);
     relayState = false;
-    Serial.println("✅ Fluxo normal. Válvula aberta.");
+    Serial.println("✅ Fluxo normal.");
+    MQTT.publish(TOPICO_MQTT_ENVIA, "Fluxo normal");
   }
 
-  // Envia os pulsos atuais para o broker MQTT
-  char mensagem[10];
-  sprintf(mensagem, "%d", pulseCount);
-  MQTT.publish(TOPICO_MQTT_ENVIA, mensagem);
-
-  pulseCount = 0;  // Reinicia o contador para o próximo intervalo de 1s
-  delay(1000);     // Espera 1 segundo antes da próxima leitura
+  delay(1000);
 }
+
 
