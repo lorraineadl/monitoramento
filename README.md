@@ -52,92 +52,112 @@ O firmware foi escrito em C++ para o Arduino framework e utiliza as bibliotecas 
 
 ### Código-fonte principal (`main.ino`)
 ```cpp
-#include <WiFi.h>             // Biblioteca principal para gerenciar conexões Wi‑Fi
-#include <WiFiAP.h>           // Biblioteca para configurar o ESP32 como ponto de acesso (AP)
-#include <WiFiClient.h>       // Biblioteca para criar clientes TCP/IP sobre Wi‑Fi
-#include <PubSubClient.h>     // Biblioteca para comunicação MQTT
+#include <WiFi.h>
+#include <PubSubClient.h>
 
-// Definição dos pinos conectados aos componentes
-#define SENSOR_PIN 4          // Pino do sensor de fluxo (CLK do Encoder)
-#define RELAY_PIN 5           // Pino do relé e LED amarelo (alerta)
-#define DT_PIN 15             // Pino DT do Encoder (não usado no exemplo atual)
-#define LED_NORMAL 2          // Pino do LED verde (indica sistema ligado)
+// Definições de pinos
+#define SENSOR_PIN 4         // Pino do sensor de fluxo (CLK do Encoder)
+#define RELAY_PIN 5          // Pino do relé e LED amarelo (alerta de vazamento)
+#define DT_PIN 15            // Pino DT do Encoder (opcional, mas incluído no circuito)
+#define LED_NORMAL 2         // Pino do LED verde (indica sistema ligado)
 
-// Variáveis globais de estado
-volatile int pulseCount = 0;  // Contador de pulsos gerados pelo encoder
-bool relayState = false;      // Estado atual do relé (ligado/desligado)
+// MQTT
+#define TOPICO_MQTT_ENVIA "sensor/fluxo"       // Tópico para enviar dados (publicar)
+#define TOPICO_MQTT_RECEBE "sensor/comando"    // Tópico para receber comandos (subscrever)
+#define ID_MQTT "esp32_simulador"              // ID do cliente MQTT
 
-// Protótipo da função de callback para mensagens MQTT recebidas
-void mqtt_callback(char* topico, byte* payload, unsigned int tamanho);
+volatile int pulseCount = 0;   // Contador de pulsos do encoder (simula fluxo de água)
+bool relayState = false;       // Estado atual do relé (ativo/inativo)
 
-// Instância do cliente TCP para MQTT
+// Instâncias do cliente WiFi e cliente MQTT
 WiFiClient mqtt_client;
-// Instância do cliente MQTT, utilizando o cliente TCP acima
 PubSubClient MQTT(mqtt_client);
 
-// Rotina de interrupção: incrementa o contador de pulsos
+// Função chamada quando uma nova mensagem MQTT é recebida
+void mqtt_callback(char* topico, byte* payload, unsigned int tamanho) {
+  String mensagem;
+  for (int i = 0; i < tamanho; i++) {
+    mensagem += (char)payload[i];
+  }
+
+  Serial.print("Mensagem recebida no tópico [");
+  Serial.print(topico);
+  Serial.print("]: ");
+  Serial.println(mensagem);
+
+  // Aqui você pode adicionar comandos recebidos via MQTT, se necessário
+}
+
+// Função de interrupção para contar pulsos
 void IRAM_ATTR countPulses() {
   pulseCount++;
 }
 
 void setup() {
-  // Configura cada pino do microcontrolador
-  pinMode(SENSOR_PIN, INPUT_PULLUP);    // Encoder como entrada com pull‑up interno
-  pinMode(DT_PIN, INPUT_PULLUP);        // DT do encoder (poderia ser usado para direção)
-  pinMode(RELAY_PIN, OUTPUT);           // Relé como saída
-  pinMode(LED_NORMAL, OUTPUT);          // LED verde como saída
+  // Configuração dos pinos
+  pinMode(SENSOR_PIN, INPUT_PULLUP);
+  pinMode(DT_PIN, INPUT_PULLUP);         // Pino DT pode ser usado para futuros incrementos
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(LED_NORMAL, OUTPUT);
 
-  // Ativa a interrupção no pino SENSOR_PIN para cada borda de subida
+  // Interrupção para contar os pulsos do encoder
   attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), countPulses, RISING);
 
-  Serial.begin(115200);                 // Inicializa monitor serial para debug
+  Serial.begin(115200);
+  Serial.println("Iniciando conexão Wi-Fi...");
 
-  // Inicia a conexão Wi‑Fi na rede simulada do Wokwi
+  // Conectar ao Wi-Fi
   WiFi.begin("Wokwi-GUEST", "");
   while (WiFi.status() != WL_CONNECTED) {
     delay(100);
-    Serial.print(".");                  // Aguarda até obter IP e imprime pontos
+    Serial.print(".");
   }
-  Serial.println("\nWi‑Fi conectado!");
+  Serial.println("\n✅ Wi-Fi conectado!");
 
-  // Configura o broker MQTT e a porta de conexão
+  // Conectar ao broker MQTT
   MQTT.setServer("broker.hivemq.com", 1883);
-
-  // (Opcional) define a função que será chamada ao receber mensagens
   MQTT.setCallback(mqtt_callback);
 
-  // Acende o LED verde para indicar que o sistema está ativo
-  digitalWrite(LED_NORMAL, HIGH);
+  Serial.println("Conectando ao broker MQTT...");
+  while (!MQTT.connect(ID_MQTT)) {
+    delay(100);
+    Serial.print(".");
+  }
+
+  Serial.println("\n✅ MQTT conectado!");
+  MQTT.subscribe(TOPICO_MQTT_RECEBE);  // Inscreve-se para receber mensagens
+
+  digitalWrite(LED_NORMAL, HIGH);  // Liga LED verde ao iniciar o sistema
+
+  // Publica uma mensagem inicial
+  MQTT.publish(TOPICO_MQTT_ENVIA, "Sistema em funcionamento");
 }
 
 void loop() {
-  // Mantém a conexão MQTT viva e processa callbacks
-  MQTT.loop();
-
-  // (Opcional) aqui entraria a lógica para conectar/reconectar ao broker:
-  // if (!MQTT.connected()) MQTT.connect("ID_do_Cliente");
+  MQTT.loop();  // Mantém a conexão MQTT ativa
 
   Serial.print("Pulsos do sensor: ");
-  Serial.println(pulseCount);           // Exibe quantos pulsos já foram contados
+  Serial.println(pulseCount);
 
-  // Lógica de detecção de vazamento baseado em limiar de pulsos
+  // Se o fluxo for muito alto (vazamento), ativa alerta (LED amarelo e relé)
   if (pulseCount > 50 && !relayState) {
-    digitalWrite(RELAY_PIN, HIGH);      // Ativa o relé e o LED amarelo
+    digitalWrite(RELAY_PIN, HIGH);
     relayState = true;
     Serial.println("⚠️ Vazamento detectado! Fechando válvula...");
   }
+  // Se fluxo normal, desativa o alerta
   else if (pulseCount <= 50 && relayState) {
-    digitalWrite(RELAY_PIN, LOW);       // Desativa o relé e o LED amarelo
+    digitalWrite(RELAY_PIN, LOW);
     relayState = false;
     Serial.println("✅ Fluxo normal. Válvula aberta.");
   }
 
-  delay(1000);                          // Espera 1 segundo antes de nova leitura
-}
+  // Envia os pulsos atuais para o broker MQTT
+  char mensagem[10];
+  sprintf(mensagem, "%d", pulseCount);
+  MQTT.publish(TOPICO_MQTT_ENVIA, mensagem);
 
-// Função de callback para mensagens MQTT recebidas (ainda não implementada)
-void mqtt_callback(char* topico, byte* payload, unsigned int tamanho) {
-  // Aqui você pode decodificar 'payload' e agir conforme o tópico
-  // Exemplo: controlar o relé através de mensagens em "comando/rele"
+  pulseCount = 0;  // Reinicia o contador para o próximo intervalo de 1s
+  delay(1000);     // Espera 1 segundo antes da próxima leitura
 }
 
