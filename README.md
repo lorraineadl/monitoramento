@@ -53,111 +53,124 @@ O firmware foi escrito em C++ para o Arduino framework e utiliza as bibliotecas 
 ### Código-fonte principal (`main.ino`)
 ```cpp
 #include <WiFi.h>
-#include <WiFiClientSecure.h> // Cliente seguro (TLS)
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 
-#define SENSOR_PIN 4
-#define RELAY_PIN 5
-#define DT_PIN 15
-#define LED_NORMAL 2
+// Definição dos pinos conectados aos componentes do sistema
+#define SENSOR_PIN 4     // Pino do sensor de fluxo (CLK do encoder rotativo)
+#define RELAY_PIN 5      // Pino do relé (também acende o LED amarelo de alerta)
+#define DT_PIN 15        // Pino DT do encoder (não usado no código atual)
+#define LED_NORMAL 2     // Pino do LED verde (indica sistema ligado)
 
-// Tópicos MQTT (ajuste conforme quiser)
-#define TOPICO_MQTT_ENVIA "vazamento/estado"
-#define TOPICO_MQTT_RECEBE "vazamento/comando"
+// Tópicos MQTT usados para comunicação com o broker
+#define TOPICO_MQTT_ENVIA "esp32/vazamento/status"    // Tópico para envio de mensagens (status do sistema)
+#define TOPICO_MQTT_RECEBE "esp32/vazamento/comando"  // Tópico para receber comandos (caso queira controlar remotamente)
 
-// Informações da rede Wi-Fi
-const char* SSID = "Wokwi-GUEST";
-const char* PASSWORD = "";
-
-// Informações do broker HiveMQ Cloud
-const char* BROKER_MQTT = "SEU_HTML";
-const int BROKER_PORT = 8883;
-const char* MQTT_USER = "SEU_USUARIO";
-const char* MQTT_PASSWORD = "SUA_SENHA";
-
-WiFiClientSecure wifiClient;  // Cliente seguro para TLS
-PubSubClient MQTT(wifiClient);
-
+// Contador de pulsos do sensor de fluxo (interruptor)
 volatile int pulseCount = 0;
-bool relayState = false;
+bool relayState = false;  // Armazena o estado atual do relé (ligado/desligado)
 
-// Função de interrupção
+// Objetos de rede e MQTT
+WiFiClientSecure secureClient;
+PubSubClient mqtt(secureClient);
+
+// Credenciais da rede Wi-Fi e configurações do HiveMQ Cloud
+const char* SSID = "USUARIO_MQTT";
+const char* PASSWORD = "SENHA_MQTT";
+const char* BROKER_MQTT = "b4e27f4309c240f5ad22ce9e11c131e2.s1.eu.hivemq.cloud";
+const int BROKER_PORT = 8883;
+const char* CLIENT_ID = "ESP32Clientusuario";
+
+// Função chamada automaticamente quando o sensor detectar um pulso (simulando o fluxo de água)
 void IRAM_ATTR countPulses() {
   pulseCount++;
 }
 
-// Callback de mensagens MQTT recebidas (se quiser tratar comandos)
+// Função chamada sempre que uma mensagem for recebida no tópico assinado
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
-  String msg;
-  for (unsigned int i = 0; i < length; i++) {
-    msg += (char)payload[i];
+  String mensagem;
+  for (int i = 0; i < length; i++) {
+    mensagem += (char)payload[i];
   }
   Serial.print("Mensagem recebida no tópico ");
   Serial.print(topic);
   Serial.print(": ");
-  Serial.println(msg);
+  Serial.println(mensagem);
+  // Aqui você pode adicionar lógica para reagir aos comandos recebidos (ex: ligar/desligar manualmente a válvula)
 }
 
-void setup() {
-  Serial.begin(115200);
+// Reconnect: Tenta se reconectar ao broker caso a conexão MQTT caia
+void reconnect() {
+  while (!mqtt.connected()) {
+    Serial.print("Tentando conexão MQTT...");
+    if (mqtt.connect(CLIENT_ID)) {
+      Serial.println("Conectado ao MQTT!");
+      mqtt.subscribe(TOPICO_MQTT_RECEBE);  // Assina o tópico para receber comandos
+    } else {
+      Serial.print("Falha, rc=");
+      Serial.print(mqtt.state());
+      Serial.println(" tentando novamente em 5 segundos...");
+      delay(5000);
+    }
+  }
+}
 
+// Setup: configura os pinos, conecta ao Wi-Fi e ao broker MQTT
+void setup() {
   pinMode(SENSOR_PIN, INPUT_PULLUP);
   pinMode(DT_PIN, INPUT_PULLUP);
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_NORMAL, OUTPUT);
 
-  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), countPulses, RISING);
+  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), countPulses, RISING); // Interrupção para contar pulsos
 
-  // Conectar Wi-Fi
+  Serial.begin(115200);
+
+  // Conectando ao Wi-Fi
   WiFi.begin(SSID, PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(100);
     Serial.print(".");
   }
-  Serial.println("Wi-Fi conectado!");
+  Serial.println("\nWiFi conectado!");
 
-  // Configura o cliente seguro
-  wifiClient.setInsecure(); // Apenas para testes. Em produção, use certificado CA válido
+  secureClient.setInsecure();  // Para testes no Wokwi (ignora verificação de certificado TLS)
 
-  MQTT.setServer(BROKER_MQTT, BROKER_PORT);
-  MQTT.setCallback(mqtt_callback);
+  mqtt.setServer(BROKER_MQTT, BROKER_PORT); // Define o broker MQTT e a porta segura
+  mqtt.setCallback(mqtt_callback);          // Define a função de callback para mensagens recebidas
 
-  // Conectar ao broker MQTT
-  while (!MQTT.connected()) {
-    Serial.println("Conectando ao broker MQTT...");
-    if (MQTT.connect("ESP32Client", MQTT_USER, MQTT_PASSWORD)) {
-      Serial.println("Conectado ao MQTT!");
-      MQTT.subscribe(TOPICO_MQTT_RECEBE);
-      MQTT.publish(TOPICO_MQTT_ENVIA, "Sistema iniciado.");
-    } else {
-      Serial.print("Falha na conexão. Código: ");
-      Serial.println(MQTT.state());
-      delay(2000);
-    }
-  }
-
-  digitalWrite(LED_NORMAL, HIGH);  // Sistema ligado
+  digitalWrite(LED_NORMAL, HIGH);  // LED verde indica sistema ligado
 }
 
+// Loop principal do sistema
 void loop() {
-  MQTT.loop();
+  if (!mqtt.connected()) {
+    reconnect();  // Verifica conexão MQTT
+  }
+  mqtt.loop();    // Mantém a conexão MQTT ativa
 
   Serial.print("Pulsos do sensor: ");
   Serial.println(pulseCount);
 
+  // Se os pulsos ultrapassarem o limite (simulando um vazamento)
   if (pulseCount > 50 && !relayState) {
-    digitalWrite(RELAY_PIN, HIGH);
+    digitalWrite(RELAY_PIN, HIGH);   // Aciona relé e LED amarelo
     relayState = true;
-    Serial.println("⚠️ Vazamento detectado!");
-    MQTT.publish(TOPICO_MQTT_ENVIA, "Vazamento detectado");
-  } else if (pulseCount <= 50 && relayState) {
-    digitalWrite(RELAY_PIN, LOW);
+    String alerta = "⚠️ Vazamento detectado! Fechando válvula...";
+    Serial.println(alerta);
+    mqtt.publish(TOPICO_MQTT_ENVIA, alerta.c_str()); // Envia alerta ao broker
+  } 
+  // Se o fluxo estiver normal novamente
+  else if (pulseCount <= 50 && relayState) {
+    digitalWrite(RELAY_PIN, LOW);    // Desliga alerta
     relayState = false;
-    Serial.println("✅ Fluxo normal.");
-    MQTT.publish(TOPICO_MQTT_ENVIA, "Fluxo normal");
+    String status = "✅ Fluxo normal. Válvula aberta.";
+    Serial.println(status);
+    mqtt.publish(TOPICO_MQTT_ENVIA, status.c_str()); // Envia status ao broker
   }
 
-  delay(1000);
+  delay(1000); // Aguarda 1 segundo antes de verificar novamente
 }
+
 
 
