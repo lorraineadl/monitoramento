@@ -75,11 +75,11 @@ WiFiClientSecure secureClient;
 PubSubClient mqtt(secureClient);
 
 // Credenciais da rede Wi-Fi e configurações do HiveMQ Cloud
-const char* SSID = "USURARIO";
-const char* PASSWORD = "SENHA";
+const char* SSID = "hivemq.webclient.1746995554009";
+const char* PASSWORD = "6PO5b$Gpu%a0?1AmTw.X";
 const char* BROKER_MQTT = "b4e27f4309c240f5ad22ce9e11c131e2.s1.eu.hivemq.cloud";
 const int BROKER_PORT = 8883;
-const char* CLIENT_ID = "ESP32Client";
+const char* CLIENT_ID = "ESP32ClientLeticia";
 
 // Função chamada automaticamente quando o sensor detectar um pulso (simulando o fluxo de água)
 void IRAM_ATTR countPulses() {
@@ -182,6 +182,3 @@ void loop() {
 
   delay(1000); // Aguarda 1 segundo antes de verificar novamente
 }
-
-
-
