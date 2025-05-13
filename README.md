@@ -75,11 +75,11 @@ WiFiClientSecure secureClient;
 PubSubClient mqtt(secureClient);
 
 // Credenciais da rede Wi-Fi e configurações do HiveMQ Cloud
-const char* SSID = "USUARIO_MQTT";
-const char* PASSWORD = "SENHA_MQTT";
+const char* SSID = "USURARIO";
+const char* PASSWORD = "SENHA";
 const char* BROKER_MQTT = "b4e27f4309c240f5ad22ce9e11c131e2.s1.eu.hivemq.cloud";
 const int BROKER_PORT = 8883;
-const char* CLIENT_ID = "ESP32Clientusuario";
+const char* CLIENT_ID = "ESP32Client";
 
 // Função chamada automaticamente quando o sensor detectar um pulso (simulando o fluxo de água)
 void IRAM_ATTR countPulses() {
@@ -96,7 +96,6 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   Serial.print(topic);
   Serial.print(": ");
   Serial.println(mensagem);
-  // Aqui você pode adicionar lógica para reagir aos comandos recebidos (ex: ligar/desligar manualmente a válvula)
 }
 
 // Reconnect: Tenta se reconectar ao broker caso a conexão MQTT caia
@@ -140,6 +139,18 @@ void setup() {
   mqtt.setCallback(mqtt_callback);          // Define a função de callback para mensagens recebidas
 
   digitalWrite(LED_NORMAL, HIGH);  // LED verde indica sistema ligado
+
+  // Mensagem de inicialização do sistema
+  String mensagemInicial = "Sistema iniciado.";
+  Serial.println(mensagemInicial);
+  mqtt.publish(TOPICO_MQTT_ENVIA, mensagemInicial.c_str());
+
+  // Verifica o fluxo inicial e envia o status
+  if (pulseCount <= 50) {
+    String statusInicial = "✅ Fluxo normal. Válvula aberta.";
+    Serial.println(statusInicial);
+    mqtt.publish(TOPICO_MQTT_ENVIA, statusInicial.c_str());
+  }
 }
 
 // Loop principal do sistema
@@ -156,9 +167,9 @@ void loop() {
   if (pulseCount > 50 && !relayState) {
     digitalWrite(RELAY_PIN, HIGH);   // Aciona relé e LED amarelo
     relayState = true;
-    String alerta = "⚠️ Vazamento detectado! Fechando válvula...";
+    String alerta = "⚠️ Vazamento detectado! Fechando válvula.";
     Serial.println(alerta);
-    mqtt.publish(TOPICO_MQTT_ENVIA, alerta.c_str()); // Envia alerta ao broker
+    mqtt.publish(TOPICO_MQTT_ENVIA, alerta.c_str());
   } 
   // Se o fluxo estiver normal novamente
   else if (pulseCount <= 50 && relayState) {
@@ -166,7 +177,7 @@ void loop() {
     relayState = false;
     String status = "✅ Fluxo normal. Válvula aberta.";
     Serial.println(status);
-    mqtt.publish(TOPICO_MQTT_ENVIA, status.c_str()); // Envia status ao broker
+    mqtt.publish(TOPICO_MQTT_ENVIA, status.c_str());
   }
 
   delay(1000); // Aguarda 1 segundo antes de verificar novamente
