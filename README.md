@@ -75,8 +75,8 @@ WiFiClientSecure secureClient;
 PubSubClient mqtt(secureClient);
 
 // Credenciais da rede Wi-Fi e configurações do HiveMQ Cloud
-const char* SSID = "hivemq.webclient.1746995554009";
-const char* PASSWORD = "6PO5b$Gpu%a0?1AmTw.X";
+const char* SSID = "USUARIO";
+const char* PASSWORD = "SENHA";
 const char* BROKER_MQTT = "b4e27f4309c240f5ad22ce9e11c131e2.s1.eu.hivemq.cloud";
 const int BROKER_PORT = 8883;
 const char* CLIENT_ID = "ESP32ClientLeticia";
