@@ -79,7 +79,7 @@ const char* SSID = "USUARIO";
 const char* PASSWORD = "SENHA";
 const char* BROKER_MQTT = "b4e27f4309c240f5ad22ce9e11c131e2.s1.eu.hivemq.cloud";
 const int BROKER_PORT = 8883;
-const char* CLIENT_ID = "ESP32ClientLeticia";
+const char* CLIENT_ID = "ESP32Client";
 
 // Função chamada automaticamente quando o sensor detectar um pulso (simulando o fluxo de água)
 void IRAM_ATTR countPulses() {
